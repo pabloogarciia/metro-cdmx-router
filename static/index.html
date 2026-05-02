@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CDMX Metro • Rutas (A*)</title>
+  <style>
+    :root{
+      --bg:#0b1022; --panel:#0e1429; --muted:#1f2a44;
+      --text:#e5e7eb; --text-dim:#9ca3af; --accent:#1fa2cf; --good:#34d399;
+      --L1:#862633; --L3:#5CB85C; --L7:#F39C12; --L9:#8B4513; --L12:#006400;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:radial-gradient(1200px 800px at 20% -10%,#14213d 0%, var(--bg) 45%, #070b14 100%);
+      color:var(--text);
+      font-family:Inter, system-ui, Segoe UI, Roboto, Arial;
+    }
+    header{
+      display:flex; justify-content:space-between; align-items:center;
+      padding:14px 16px;
+      background:linear-gradient(180deg,#0e162e,#0a0f22);
+      border-bottom:1px solid #1d2945;
+    }
+    header h1{margin:0; font-size:18px}
+    .btn{
+      background:#1b253f; color:#dbe6f1;
+      border:1px solid #22304a;
+      padding:9px 12px; border-radius:10px; cursor:pointer;
+    }
+    .btn.primary{
+      background:linear-gradient(180deg,#1f9dd1,#127aa5);
+      border-color:#2aa2cf;
+    }
+    .btn:hover{filter:brightness(1.05)}
+    .layout{
+      display:grid;
+      grid-template-columns: 340px 1fr 420px;
+      gap:12px;
+      padding:12px;
+      height:calc(100% - 58px);
+    }
+    .panel{
+      background:linear-gradient(180deg,#0d1327,#0b1120);
+      border:1px solid #1f2937;
+      border-radius:14px;
+      padding:14px;
+      overflow:auto;
+    }
+    label{display:block; font-size:13px; margin:8px 0 6px}
+    select{
+      width:100%;
+      background:#0c1329;
+      border:1px solid #20304c;
+      color:#e5e7eb;
+      border-radius:10px;
+      padding:10px;
+    }
+    .row{display:flex; gap:10px; align-items:center}
+    #stage{
+      position:relative;
+      width:100%; height:100%;
+      min-height:1200px;           /* mapa más grande (antes 850px) */
+      border-radius:14px;
+      overflow:hidden;
+      border:1px solid #1f2937;
+      background:radial-gradient(1000px 700px at 70% -20%, #132442 0%, #0b1120 40%, #070a14 100%);
+    }
+    #svg{
+      width:100%;
+      height:100%;
+      transform: scale(1.4);          /* zoom del mapa */
+      transform-origin: center;       /* que crezca desde el centro */
+    }
+    .legend{
+      position:absolute; bottom:10px; left:10px;
+      background:#0b1120cc;
+      border:1px solid #1f2937;
+      border-radius:10px;
+      padding:8px 10px;
+      font-size:12px;
+    }
+    .dot{
+      display:inline-block; width:10px; height:10px;
+      border-radius:50%; margin-right:6px; border:1px solid #0005;
+    }
+    .line{
+      stroke-width:10;                /* antes 6: líneas más gruesas */
+      stroke-linecap:round;
+      transition:opacity .2s;
+    }
+    .L1{stroke:var(--L1)} .L3{stroke:var(--L3)} .L7{stroke:var(--L7)}
+    .L9{stroke:var(--L9)} .L12{stroke:var(--L12)}
+    .station circle{fill:#d1d5db; stroke:#0b0b0b; stroke-width:1.2}
+    .station.transfer circle{fill:#fde68a; stroke:#000; stroke-width:2}
+    .station text{
+      font-size:20px;              /* antes 13px: etiquetas más grandes */
+      paint-order: stroke;
+      stroke:#0b0b0b; stroke-width:3;
+      fill:#e5e7eb;
+    }
+    .route{
+      stroke:var(--good);
+      stroke-width:14;              /* antes 8: ruta más gruesa */
+      stroke-linecap:round;
+      filter: drop-shadow(0 0 8px #22c55e88);
+    }
+    .summary{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:10px; align-items:center;
+      padding:10px;
+      background:#0f172a;
+      border:1px solid #22304a;
+      border-radius:12px;
+    }
+    .kpi{font-size:24px}
+    .step{
+      padding:10px;
+      border:1px solid #22304a;
+      border-radius:10px;
+      margin-bottom:8px;
+      background:#0f172a;
+    }
+    .pill{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid #2a3347;
+      font-size:11px;
+      margin-left:6px;
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>CDMX Metro • Rutas óptimas</h1>
+</header>
+
+<main class="layout">
+  <!-- PANEL IZQUIERDO -->
+  <aside class="panel">
+    <h3 style="margin-top:0;color:#93a4c4;letter-spacing:.15em;font-size:13px">BÚSQUEDA</h3>
+    <label for="from">Origen</label>
+    <select id="from"></select>
+
+    <label for="to">Destino</label>
+    <select id="to"></select>
+
+    <!-- Botones justo debajo de origen/destino -->
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="swap">Intercambiar</button>
+      <button class="btn primary" id="run">Calcular ruta</button>
+      <button class="btn" id="reset">Resetear</button>
+    </div>
+
+    <p style="font-size:12px;color:#9ca3af;margin-top:10px">
+      La hora local de <b>Ciudad de México</b> se toma en el servidor para las frecuencias.
+    </p>
+  </aside>
+
+  <!-- MAPA CENTRAL -->
+  <section class="panel">
+    <div id="stage">
+      <svg id="svg" viewBox="0 0 1600 1100" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="legend">
+        <span class="dot" style="background:var(--L1)"></span>L1
+        <span class="dot" style="background:var(--L3); margin-left:10px"></span>L3
+        <span class="dot" style="background:var(--L7); margin-left:10px"></span>L7
+        <span class="dot" style="background:var(--L9); margin-left:10px"></span>L9
+        <span class="dot" style="background:var(--L12); margin-left:10px"></span>L12
+        <span class="dot" style="background:#34d399; margin-left:10px"></span>Ruta
+      </div>
+    </div>
+  </section>
+
+  <!-- PANEL DERECHO -->
+  <aside class="panel">
+    <h3 style="margin-top:0;color:#93a4c4;letter-spacing:.15em;font-size:13px">RESUMEN</h3>
+    <div class="summary">
+      <div>
+        <div id="sum-title" style="font-size:13px;color:#c9d5ea">Sin ruta</div>
+        <div style="font-size:12px;color:#9ca3af">
+          Transbordos: <span id="sum-transfers">-</span> · Líneas: <span id="sum-lines">-</span>
+        </div>
+      </div>
+      <div id="sum-time" class="kpi">—</div>
+    </div>
+
+    <div style="height:12px"></div>
+    <h3 style="color:#93a4c4;letter-spacing:.15em;font-size:13px">PASOS</h3>
+    <div id="steps"></div>
+  </aside>
+</main>
+
+<script>
+/* ===========================
+   Posiciones en rejilla
+   =========================== */
+const GRID_POS = {
+  "Polanco":[0,16], "Auditorio":[0,14], "Constituyentes":[0,12], "San Pedro de los Pinos":[0,8],
+  "San Antonio":[0,6], "Mixcoac":[0,4], "Barranca del Muerto":[0,2],
+  "Tacubaya":[-0.5,10],
+  "Observatorio":[-4,10], "Juanacatlan":[2,11], "Chapultepec":[4,12], "Sevilla":[6,13],
+  "Insurgentes":[8,14], "Cuauhtemoc":[10,15], "Balderas":[12,15],
+  "Juarez":[12,17], "Niños Heroes":[12,13], "Hospital General":[12,11], "Centro Médico":[12,9],
+  "Etiopia":[12,7], "Eugenia":[12,5], "Division del Norte":[12,3], "Zapata":[12,1],
+  "Coyoacan":[12,-1], "Viveros":[12,-3], "M. A. de Quevedo":[12,-5], "Copilco":[12,-7], "Universidad":[12,-9],
+  "Patriotismo":[4,9], "Chilpancingo":[7,9], "Lazaro Cardenas":[14,9],
+  "Insurgentes Sur":[3,4], "Hospital 20 de Noviembre":[6,4], "Parque de los Venados":[14,4], "Eje Central":[16,4]
+};
+
+/* Escalado automático para que todo quepa en el viewBox 0..1600 x 0..1100 */
+let scale, minGX, maxGY, offsetX, offsetY;
+(function computeScaling(){
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(const [_,[gx,gy]] of Object.entries(GRID_POS)){
+    if(gx<minX) minX=gx;
+    if(gx>maxX) maxX=gx;
+    if(gy<minY) minY=gy;
+    if(gy>maxY) maxY=gy;
+  }
+  const padding = 1;
+  minGX = minX - padding;
+  const maxGX = maxX + padding;
+  const minGY = minY - padding;
+  maxGY = maxY + padding;
+
+  const spanX = maxGX - minGX;
+  const spanY = maxGY - minGY;
+
+  const viewW = 1600, viewH = 1100;
+  const sX = viewW / spanX;
+  const sY = viewH / spanY;
+  scale = Math.min(sX, sY);
+
+  const usedW = spanX * scale;
+  const usedH = spanY * scale;
+  offsetX = (viewW - usedW) / 2;
+  offsetY = (viewH - usedH) / 2;
+})();
+
+function pxy(name){
+  const [gx,gy] = GRID_POS[name];
+  const x = (gx - minGX) * scale + offsetX;
+  const y = (maxGY - gy) * scale + offsetY; // invertimos Y
+  return [x,y];
+}
+
+/* Aristas por línea */
+const EDGES = [
+  ["Polanco","Auditorio","7"],["Auditorio","Constituyentes","7"],["Constituyentes","Tacubaya","7"],
+  ["San Pedro de los Pinos","Tacubaya","7"],["San Pedro de los Pinos","San Antonio","7"],
+  ["San Antonio","Mixcoac","7"],["Mixcoac","Barranca del Muerto","7"],
+  ["Observatorio","Tacubaya","1"],["Juanacatlan","Tacubaya","1"],["Juanacatlan","Chapultepec","1"],
+  ["Chapultepec","Sevilla","1"],["Sevilla","Insurgentes","1"],["Insurgentes","Cuauhtemoc","1"],["Cuauhtemoc","Balderas","1"],
+  ["Juarez","Balderas","3"],["Balderas","Niños Heroes","3"],["Niños Heroes","Hospital General","3"],["Hospital General","Centro Médico","3"],
+  ["Centro Médico","Etiopia","3"],["Etiopia","Eugenia","3"],["Eugenia","Division del Norte","3"],["Division del Norte","Zapata","3"],
+  ["Zapata","Coyoacan","3"],["Coyoacan","Viveros","3"],["Viveros","M. A. de Quevedo","3"],["M. A. de Quevedo","Copilco","3"],["Copilco","Universidad","3"],
+  ["Patriotismo","Tacubaya","9"],["Patriotismo","Chilpancingo","9"],["Chilpancingo","Centro Médico","9"],["Centro Médico","Lazaro Cardenas","9"],
+  ["Mixcoac","Insurgentes Sur","12"],["Insurgentes Sur","Hospital 20 de Noviembre","12"],["Hospital 20 de Noviembre","Zapata","12"],
+  ["Zapata","Parque de los Venados","12"],["Parque de los Venados","Eje Central","12"],
+];
+
+/* SVG layers */
+const svg = document.getElementById('svg');
+const gLines = document.createElementNS('http://www.w3.org/2000/svg','g');
+const gRoute = document.createElementNS('http://www.w3.org/2000/svg','g');
+const gStations = document.createElementNS('http://www.w3.org/2000/svg','g');
+svg.append(gLines,gRoute,gStations);
+
+function drawBase(){
+  gLines.innerHTML=''; gStations.innerHTML=''; gRoute.innerHTML='';
+  // Líneas
+  for(const [a,b,ln] of EDGES){
+    const [x1,y1]=pxy(a), [x2,y2]=pxy(b);
+    const el = document.createElementNS('http://www.w3.org/2000/svg','line');
+    el.setAttribute('x1',x1); el.setAttribute('y1',y1);
+    el.setAttribute('x2',x2); el.setAttribute('y2',y2);
+    el.setAttribute('class','line L'+ln);
+    el.dataset.a = a; el.dataset.b = b; el.dataset.line = ln;
+    gLines.appendChild(el);
+  }
+  // Estaciones
+  const transfers = new Set(["Tacubaya","Balderas","Centro Médico","Mixcoac","Zapata"]);
+  for(const name of Object.keys(GRID_POS)){
+    const [x,y]=pxy(name);
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','station'+(transfers.has(name)?' transfer':'')); g.dataset.id = name;
+    const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r', transfers.has(name)?'8.5':'7');
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',x+10); t.setAttribute('y',y-10); t.textContent = name;
+    g.append(c,t); gStations.appendChild(g);
+  }
+}
+drawBase();
+
+/* Dibujo de la ruta y atenuación del resto */
+function drawRoute(path){
+  gRoute.innerHTML='';
+  // Si hay ruta, atenúa líneas base; si no, restaura
+  const baseLines = gLines.querySelectorAll('line');
+  if(!path || path.length<2){
+    baseLines.forEach(l => l.style.opacity = '1');
+    return;
+  }
+  baseLines.forEach(l => l.style.opacity = '0.25');
+
+  for(let i=0;i<path.length-1;i++){
+    const a = path[i], b = path[i+1];
+    const [x1,y1]=pxy(a), [x2,y2]=pxy(b);
+    const el = document.createElementNS('http://www.w3.org/2000/svg','line');
+    el.setAttribute('x1',x1); el.setAttribute('y1',y1);
+    el.setAttribute('x2',x2); el.setAttribute('y2',y2);
+    el.setAttribute('class','route');
+    gRoute.appendChild(el);
+  }
+}
+
+/* Poblado de estaciones desde el backend */
+async function loadStations(){
+  const res = await fetch('/api/stations');
+  const data = await res.json();
+  const sFrom = document.getElementById('from');
+  const sTo   = document.getElementById('to');
+  sFrom.innerHTML=''; sTo.innerHTML='';
+  for(const s of data.stations.sort((a,b)=> a.localeCompare(b))){
+    sFrom.add(new Option(s, s));
+    sTo.add(new Option(s, s));
+  }
+  // valores por defecto
+  if(data.stations.includes("Centro Médico")) sFrom.value = "Centro Médico";
+  if(data.stations.includes("Chapultepec")) sTo.value = "Chapultepec";
+}
+loadStations();
+
+/* Llamar a /api/route */
+async function searchRoute(){
+  const from = document.getElementById('from').value;
+  const to   = document.getElementById('to').value;
+
+  const res = await fetch('/api/route', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({from, to})
+  });
+  const data = await res.json();
+
+  const sumTitle = document.getElementById('sum-title');
+  const sumTime = document.getElementById('sum-time');
+  const sumTransfers = document.getElementById('sum-transfers');
+  const sumLines = document.getElementById('sum-lines');
+  const steps = document.getElementById('steps');
+  steps.innerHTML='';
+
+  if(!data.path){
+    sumTitle.textContent = 'Sin ruta';
+    sumTime.textContent = '—';
+    sumTransfers.textContent = '-';
+    sumLines.textContent = '-';
+    drawRoute(null);
+    return;
+  }
+
+  sumTitle.textContent = `${data.summary.from} → ${data.summary.to}`;
+  sumTime.textContent = `${data.summary.time_min} min`;
+  sumTransfers.textContent = data.summary.transfers;
+  sumLines.textContent = data.summary.lines.map(l=>'L'+l).join(', ');
+
+  for(const s of data.steps){
+    const div = document.createElement('div');
+    div.className='step';
+    const tag = s.action === 'transfer' ? 'Transbordo' : 'Tramo';
+    div.innerHTML =
+      `<div><b>${s.from}</b> → <b>${s.to}</b>
+         <span class="pill">${tag}${
+           s.action==='transfer'
+             ? ` L${s.line_from}→L${s.line_to}`
+             : ` L${s.line_from}`
+         }</span></div>`;
+    steps.appendChild(div);
+  }
+
+  drawRoute(data.path);
+}
+
+/* Eventos botones */
+document.getElementById('run').onclick = searchRoute;
+document.getElementById('swap').onclick = ()=>{
+  const a = document.getElementById('from');
+  const b = document.getElementById('to');
+  const tmp = a.value;
+  a.value = b.value;
+  b.value = tmp;
+};
+document.getElementById('reset').onclick = () => {
+  location.reload();
+};
+</script>
+</body>
+</html>
